@@ -310,7 +310,7 @@ public:
             return;
         }
 
-        double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+        long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
         if(spread > MAX_SPREAD_POINTS) {
             if(EnableDiagnostics) {
                 Print("Spread too high: ", spread, " points");
@@ -384,7 +384,7 @@ public:
 
         m_priceBuffer[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
         m_volumeBuffer[0] = (double)iVolume(_Symbol, PERIOD_CURRENT, 0);
-        m_spreadBuffer[0] = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+        m_spreadBuffer[0] = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
 
         double atr[];
         ArraySetAsSeries(atr, true);
@@ -991,10 +991,10 @@ public:
     }
 
     // Public accessors for reporting
-    int m_totalTrades;
-    int m_winningTrades;
-    double m_totalProfit;
-    double m_maxDrawdown;
+    int GetTotalTrades() const { return m_totalTrades; }
+    int GetWinningTrades() const { return m_winningTrades; }
+    double GetTotalProfit() const { return m_totalProfit; }
+    double GetMaxDrawdown() const { return m_maxDrawdown; }
 };
 
 //+------------------------------------------------------------------+
@@ -1097,12 +1097,12 @@ void OnTimer() {
 double OnTester() {
     if(g_EA == NULL) return 0;
 
-    double totalTrades = g_EA.m_totalTrades;
+    double totalTrades = g_EA.GetTotalTrades();
     if(totalTrades < 30) return 0;
 
-    double winRate = (double)g_EA.m_winningTrades / totalTrades;
-    double avgProfit = g_EA.m_totalProfit / totalTrades;
-    double maxDD = g_EA.m_maxDrawdown;
+    double winRate = (double)g_EA.GetWinningTrades() / totalTrades;
+    double avgProfit = g_EA.GetTotalProfit() / totalTrades;
+    double maxDD = g_EA.GetMaxDrawdown();
 
     double performance = (winRate * avgProfit) / MathMax(0.01, maxDD);
 
