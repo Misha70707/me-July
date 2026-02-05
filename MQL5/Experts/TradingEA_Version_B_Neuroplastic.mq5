@@ -119,6 +119,7 @@ private:
     double            m_priceBuffer[];
     double            m_volumeBuffer[];
     double            m_volatilityBuffer[];
+    double            m_features[];
 
     // Technical indicator handles
     int               m_atrHandle;
@@ -220,11 +221,13 @@ public:
         ArrayResize(m_priceBuffer, RegimeWindow);
         ArrayResize(m_volumeBuffer, RegimeWindow);
         ArrayResize(m_volatilityBuffer, RegimeWindow);
+        ArrayResize(m_features, 20);
         ArrayResize(m_profitHistory, PROFIT_CACHE_SIZE);
 
         ArrayInitialize(m_priceBuffer, 0);
         ArrayInitialize(m_volumeBuffer, 0);
         ArrayInitialize(m_volatilityBuffer, 0);
+        ArrayInitialize(m_features, 0);
         ArrayInitialize(m_profitHistory, 0);
 
         for(int i = 0; i < MaxPositions; i++) {
@@ -291,16 +294,20 @@ public:
         datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
         bool isNewBar = (currentBarTime != m_lastBarTime);
 
+        // --- Core Market Processing (Once per bar) ---
         if(isNewBar) {
             m_lastBarTime = currentBarTime;
             m_barsSinceStart++;
 
-            if(m_barsSinceStart < RegimeWindow) {
-                return;
-            }
+            // Always update regime analysis on new bar to fill buffers
+            DetectMarketRegime();
         }
 
+        // --- Per-Tick Management ---
         UpdateDrawdown();
+        ManageOpenPositions();
+
+        // --- Safety Checks ---
         if(m_currentDrawdown > MaxDrawdownPercent / 100.0) {
             Print("Maximum drawdown reached: ", NormalizeDouble(m_currentDrawdown * 100, 2), "%");
             CloseAllPositions("Max drawdown");
@@ -309,24 +316,29 @@ public:
 
         long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
         if(spread > MAX_SPREAD_POINTS) {
-            if(EnableDiagnostics) {
+            if(EnableDiagnostics && isNewBar) {
                 Print("Spread too high: ", spread, " points");
             }
             return;
         }
 
-        DetectMarketRegime();
+        // --- Trading Logic (Gated by Warmup & Regime) ---
+        if(m_barsSinceStart < RegimeWindow) {
+            return; // Still collecting data
+        }
 
         if(!TradeInTransitions && m_currentRegime == REGIME_TRANSITIONING) {
             return;
         }
 
-        double features[];
-        if(!PrepareFeatures(features)) {
+        // Only generate signals on new bar to avoid signal flickering and excessive CPU
+        if(!isNewBar) return;
+
+        if(!PrepareFeatures(m_features)) {
             return;
         }
 
-        int brainSignal = GetBrainSignal(features, m_currentDrawdown);
+        int brainSignal = GetBrainSignal(m_features, m_currentDrawdown);
         double confidence = GetBrainConfidence();
 
         int traditionalSignal = GenerateTraditionalSignal();
@@ -360,8 +372,6 @@ public:
                 ExecuteTrade(finalSignal, finalConfidence);
             }
         }
-
-        ManageOpenPositions();
     }
 
     void DetectMarketRegime() {
@@ -435,7 +445,6 @@ public:
     }
 
     bool PrepareFeatures(double &features[]) {
-        ArrayResize(features, 20);
         ArrayInitialize(features, 0);
 
         double close0 = iClose(_Symbol, PERIOD_CURRENT, 0);
@@ -1003,12 +1012,6 @@ int OnInit() {
     Print("Neuroplastic Trading Brain v", SYSTEM_VERSION, " INITIALIZING");
     Print("Symbol: ", _Symbol, " | Timeframe: ", EnumToString(PERIOD_CURRENT));
 
-    CNeuroplasticEA tempEA;
-    if(!tempEA.ValidateEnvironment()) {
-        Print("FATAL: Environment validation failed");
-        return INIT_FAILED;
-    }
-
     if(!InitializeNeuroplasticBrain()) {
         Print("FATAL: Brain initialization failed");
         return INIT_FAILED;
@@ -1017,6 +1020,14 @@ int OnInit() {
     g_EA = new CNeuroplasticEA();
     if(g_EA == NULL) {
         Print("FATAL: EA initialization failed");
+        CleanupBrain();
+        return INIT_FAILED;
+    }
+
+    if(!g_EA.ValidateEnvironment()) {
+        Print("FATAL: Environment validation failed");
+        delete g_EA;
+        g_EA = NULL;
         CleanupBrain();
         return INIT_FAILED;
     }
