@@ -597,17 +597,34 @@ void PrepareFeatures(double &features[], MARKET_REGIME regime) {
     if(ArraySize(features) != 20) ArrayResize(features, 20);
     ArrayInitialize(features, 0);
 
-    // Price action
+    // Static buffers
     static double close[], high[], low[], open[];
-    ArraySetAsSeries(close, true);
-    ArraySetAsSeries(high, true);
-    ArraySetAsSeries(low, true);
-    ArraySetAsSeries(open, true);
+    static double rsi[], macdMain[], macdSignal[];
+    static double bbUpper[], bbLower[], bbMiddle[];
+    static long volume[];
+    static bool isInitialized = false;
 
-    CopyClose(_Symbol, PERIOD_CURRENT, 0, 10, close);
-    CopyHigh(_Symbol, PERIOD_CURRENT, 0, 10, high);
-    CopyLow(_Symbol, PERIOD_CURRENT, 0, 10, low);
-    CopyOpen(_Symbol, PERIOD_CURRENT, 0, 10, open);
+    // One-time initialization
+    if(!isInitialized) {
+        ArraySetAsSeries(close, true);
+        ArraySetAsSeries(high, true);
+        ArraySetAsSeries(low, true);
+        ArraySetAsSeries(open, true);
+        ArraySetAsSeries(rsi, true);
+        ArraySetAsSeries(macdMain, true);
+        ArraySetAsSeries(macdSignal, true);
+        ArraySetAsSeries(bbUpper, true);
+        ArraySetAsSeries(bbLower, true);
+        ArraySetAsSeries(bbMiddle, true);
+        ArraySetAsSeries(volume, true);
+        isInitialized = true;
+    }
+
+    // Minimized data fetching with validation
+    if(CopyClose(_Symbol, PERIOD_CURRENT, 0, 10, close) < 10) return;
+    if(CopyHigh(_Symbol, PERIOD_CURRENT, 0, 1, high) < 1) return;
+    if(CopyLow(_Symbol, PERIOD_CURRENT, 0, 1, low) < 1) return;
+    if(CopyOpen(_Symbol, PERIOD_CURRENT, 0, 1, open) < 1) return;
 
     // Feature 0-2: Price momentum
     features[0] = (close[0] - close[1]) / close[1];
@@ -619,28 +636,18 @@ void PrepareFeatures(double &features[], MARKET_REGIME regime) {
     features[4] = (high[0] - low[0]) / close[0];
 
     // Feature 5-7: Indicators
-    static double rsi[], macdMain[], macdSignal[];
-    ArraySetAsSeries(rsi, true);
-    ArraySetAsSeries(macdMain, true);
-    ArraySetAsSeries(macdSignal, true);
-
-    CopyBuffer(g_handleRSI, 0, 0, 1, rsi);
-    CopyBuffer(g_handleMACD, 0, 0, 1, macdMain);
-    CopyBuffer(g_handleMACD, 1, 0, 1, macdSignal);
+    if(CopyBuffer(g_handleRSI, 0, 0, 1, rsi) < 1) return;
+    if(CopyBuffer(g_handleMACD, 0, 0, 1, macdMain) < 1) return;
+    if(CopyBuffer(g_handleMACD, 1, 0, 1, macdSignal) < 1) return;
 
     features[5] = (rsi[0] - 50) / 50;
     features[6] = macdMain[0] / close[0];
     features[7] = (macdMain[0] - macdSignal[0]) / close[0];
 
     // Feature 8-9: Bollinger Bands
-    static double bbUpper[], bbLower[], bbMiddle[];
-    ArraySetAsSeries(bbUpper, true);
-    ArraySetAsSeries(bbLower, true);
-    ArraySetAsSeries(bbMiddle, true);
-
-    CopyBuffer(g_handleBB, 1, 0, 1, bbUpper);
-    CopyBuffer(g_handleBB, 2, 0, 1, bbLower);
-    CopyBuffer(g_handleBB, 0, 0, 1, bbMiddle);
+    if(CopyBuffer(g_handleBB, 1, 0, 1, bbUpper) < 1) return;
+    if(CopyBuffer(g_handleBB, 2, 0, 1, bbLower) < 1) return;
+    if(CopyBuffer(g_handleBB, 0, 0, 1, bbMiddle) < 1) return;
 
     features[8] = (close[0] - bbMiddle[0]) / (bbUpper[0] - bbLower[0] + 0.00001);
     features[9] = (bbUpper[0] - bbLower[0]) / bbMiddle[0];
@@ -648,10 +655,8 @@ void PrepareFeatures(double &features[], MARKET_REGIME regime) {
     // Feature 10: Regime
     features[10] = (double)regime / 8.0;
 
-    // Feature 11-12: Volume (tick volume)
-    static long volume[];
-    ArraySetAsSeries(volume, true);
-    CopyTickVolume(_Symbol, PERIOD_CURRENT, 0, 5, volume);
+    // Feature 11-12: Volume
+    if(CopyTickVolume(_Symbol, PERIOD_CURRENT, 0, 5, volume) < 5) return;
 
     double avgVol = (volume[0] + volume[1] + volume[2] + volume[3] + volume[4]) / 5.0;
     features[11] = volume[0] / (avgVol + 1);
