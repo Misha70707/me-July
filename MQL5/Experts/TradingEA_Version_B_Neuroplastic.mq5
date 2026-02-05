@@ -726,9 +726,9 @@ public:
     }
 
     void ManageOpenPositions() {
-        double atr[];
-        ArraySetAsSeries(atr, true);
-        bool atrValid = (CopyBuffer(m_atrHandle, 0, 0, 1, atr) > 0);
+        double atr[1];
+        // Static array avoids heap allocation; AsSeries irrelevant for 1 element
+        bool atrValid = (CopyBuffer(m_atrHandle, 0, 0, 1, atr) == 1);
         double trailDistance = 0;
 
         if(atrValid) {
