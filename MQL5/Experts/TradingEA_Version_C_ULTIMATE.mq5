@@ -546,14 +546,19 @@ void OnTick() {
 //| Detect Market Regime                                             |
 //+------------------------------------------------------------------+
 MARKET_REGIME DetectMarketRegime() {
-    double fastMA[], slowMA[], atr[];
-    ArraySetAsSeries(fastMA, true);
-    ArraySetAsSeries(slowMA, true);
-    ArraySetAsSeries(atr, true);
+    static double fastMA[], slowMA[], atr[];
+    static bool isInitialized = false;
 
-    if(CopyBuffer(g_handleFastMA, 0, 0, 20, fastMA) <= 0) return REGIME_UNKNOWN;
-    if(CopyBuffer(g_handleSlowMA, 0, 0, 20, slowMA) <= 0) return REGIME_UNKNOWN;
-    if(CopyBuffer(g_handleATR, 0, 0, 10, atr) <= 0) return REGIME_UNKNOWN;
+    if(!isInitialized) {
+        ArraySetAsSeries(fastMA, true);
+        ArraySetAsSeries(slowMA, true);
+        ArraySetAsSeries(atr, true);
+        isInitialized = true;
+    }
+
+    if(CopyBuffer(g_handleFastMA, 0, 0, 20, fastMA) < 20) return REGIME_UNKNOWN;
+    if(CopyBuffer(g_handleSlowMA, 0, 0, 20, slowMA) < 20) return REGIME_UNKNOWN;
+    if(CopyBuffer(g_handleATR, 0, 0, 10, atr) < 10) return REGIME_UNKNOWN;
 
     double currentPrice = iClose(_Symbol, PERIOD_CURRENT, 0);
 
@@ -830,8 +835,8 @@ int GenerateBreakoutSignal(string &reason) {
 //+------------------------------------------------------------------+
 //| Execute Trade                                                    |
 //+------------------------------------------------------------------+
-void ExecuteTrade(int signal, STRATEGY_TYPE strategy, double confidence, string reason) {
-    double lotSize = CalculateLotSize(confidence, strategy);
+void ExecuteTrade(int signal, STRATEGY_TYPE strategy, double confidence, string reason, double overrideLotSize = 0.0) {
+    double lotSize = (overrideLotSize > 0.0) ? overrideLotSize : CalculateLotSize(confidence, strategy);
 
     double atr[];
     ArraySetAsSeries(atr, true);
@@ -1063,7 +1068,7 @@ void ManagePositions() {
             if(shouldScale && g_activeTradeCount < MaxPositions) {
                 double scaleLot = g_trades[i].lotSize * 0.5;
                 ExecuteTrade(g_trades[i].direction, g_trades[i].strategy,
-                            g_trades[i].confidence, "Scale_In");
+                            g_trades[i].confidence, "Scale_In", scaleLot);
                 g_trades[i].scaledIn = true;
                 Print("✓ Scaled into position #", g_trades[i].ticket);
             }
