@@ -121,6 +121,16 @@ private:
     double            m_volatilityBuffer[];
     double            m_features[];
 
+    // Zero-allocation buffers (Pre-allocated for tick processing)
+    double            m_rsiBuffer[];
+    double            m_macdMainBuffer[];
+    double            m_macdSignalBuffer[];
+    double            m_bbUpperBuffer[];
+    double            m_bbLowerBuffer[];
+    double            m_bbMiddleBuffer[];
+    double            m_maBuffer[];
+    double            m_atrBuffer[];
+
     // Technical indicator handles
     int               m_atrHandle;
     int               m_rsiHandle;
@@ -223,6 +233,26 @@ public:
         ArrayResize(m_volatilityBuffer, RegimeWindow);
         ArrayResize(m_features, 20);
         ArrayResize(m_profitHistory, PROFIT_CACHE_SIZE);
+
+        // Pre-allocate tick buffers
+        ArrayResize(m_rsiBuffer, 2);
+        ArrayResize(m_macdMainBuffer, 2);
+        ArrayResize(m_macdSignalBuffer, 2);
+        ArrayResize(m_bbUpperBuffer, 2);
+        ArrayResize(m_bbLowerBuffer, 2);
+        ArrayResize(m_bbMiddleBuffer, 2);
+        ArrayResize(m_maBuffer, 2);
+        ArrayResize(m_atrBuffer, 2);
+
+        // Set series flag once
+        ArraySetAsSeries(m_rsiBuffer, true);
+        ArraySetAsSeries(m_macdMainBuffer, true);
+        ArraySetAsSeries(m_macdSignalBuffer, true);
+        ArraySetAsSeries(m_bbUpperBuffer, true);
+        ArraySetAsSeries(m_bbLowerBuffer, true);
+        ArraySetAsSeries(m_bbMiddleBuffer, true);
+        ArraySetAsSeries(m_maBuffer, true);
+        ArraySetAsSeries(m_atrBuffer, true);
 
         ArrayInitialize(m_priceBuffer, 0);
         ArrayInitialize(m_volumeBuffer, 0);
@@ -388,10 +418,8 @@ public:
         m_priceBuffer[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
         m_volumeBuffer[0] = (double)iVolume(_Symbol, PERIOD_CURRENT, 0);
 
-        double atr[];
-        ArraySetAsSeries(atr, true);
-        if(CopyBuffer(m_atrHandle, 0, 0, 1, atr) > 0 && atr[0] > 0) {
-            m_volatilityBuffer[0] = atr[0];
+        if(CopyBuffer(m_atrHandle, 0, 0, 1, m_atrBuffer) > 0 && m_atrBuffer[0] > 0) {
+            m_volatilityBuffer[0] = m_atrBuffer[0];
         } else {
             m_volatilityBuffer[0] = MathAbs(iHigh(_Symbol, PERIOD_CURRENT, 0) -
                                            iLow(_Symbol, PERIOD_CURRENT, 0));
@@ -460,34 +488,24 @@ public:
         features[2] = NormalizeVolume(iVolume(_Symbol, PERIOD_CURRENT, 0));
         features[3] = NormalizeVolume(iVolume(_Symbol, PERIOD_CURRENT, 1));
 
-        double rsi[];
-        ArraySetAsSeries(rsi, true);
-        if(CopyBuffer(m_rsiHandle, 0, 0, 1, rsi) > 0) {
-            features[4] = (rsi[0] - 50) / 50;
+        if(CopyBuffer(m_rsiHandle, 0, 0, 1, m_rsiBuffer) > 0) {
+            features[4] = (m_rsiBuffer[0] - 50) / 50;
         }
 
-        double macdMain[], macdSignal[];
-        ArraySetAsSeries(macdMain, true);
-        ArraySetAsSeries(macdSignal, true);
-        if(CopyBuffer(m_macdHandle, 0, 0, 1, macdMain) > 0 &&
-           CopyBuffer(m_macdHandle, 1, 0, 1, macdSignal) > 0) {
-            features[5] = NormalizePrice(macdMain[0]);
-            features[6] = NormalizePrice(macdMain[0] - macdSignal[0]);
+        if(CopyBuffer(m_macdHandle, 0, 0, 1, m_macdMainBuffer) > 0 &&
+           CopyBuffer(m_macdHandle, 1, 0, 1, m_macdSignalBuffer) > 0) {
+            features[5] = NormalizePrice(m_macdMainBuffer[0]);
+            features[6] = NormalizePrice(m_macdMainBuffer[0] - m_macdSignalBuffer[0]);
         }
 
-        double upper[], lower[], middle[];
-        ArraySetAsSeries(upper, true);
-        ArraySetAsSeries(lower, true);
-        ArraySetAsSeries(middle, true);
+        if(CopyBuffer(m_bbHandle, 1, 0, 1, m_bbUpperBuffer) > 0 &&
+           CopyBuffer(m_bbHandle, 2, 0, 1, m_bbLowerBuffer) > 0 &&
+           CopyBuffer(m_bbHandle, 0, 0, 1, m_bbMiddleBuffer) > 0) {
 
-        if(CopyBuffer(m_bbHandle, 1, 0, 1, upper) > 0 &&
-           CopyBuffer(m_bbHandle, 2, 0, 1, lower) > 0 &&
-           CopyBuffer(m_bbHandle, 0, 0, 1, middle) > 0) {
-
-            double bbWidth = upper[0] - lower[0];
+            double bbWidth = m_bbUpperBuffer[0] - m_bbLowerBuffer[0];
             if(bbWidth > 0) {
-                features[7] = SafeDivide(close0 - middle[0], bbWidth);
-                features[8] = SafeDivide(bbWidth, middle[0]);
+                features[7] = SafeDivide(close0 - m_bbMiddleBuffer[0], bbWidth);
+                features[8] = SafeDivide(bbWidth, m_bbMiddleBuffer[0]);
             }
         }
 
@@ -505,39 +523,28 @@ public:
     }
 
     int GenerateTraditionalSignal() {
-        double rsi[], macdMain[], macdSignal[];
-        double upper[], lower[], middle[], ma[];
-
-        ArraySetAsSeries(rsi, true);
-        ArraySetAsSeries(macdMain, true);
-        ArraySetAsSeries(macdSignal, true);
-        ArraySetAsSeries(upper, true);
-        ArraySetAsSeries(lower, true);
-        ArraySetAsSeries(middle, true);
-        ArraySetAsSeries(ma, true);
-
-        if(CopyBuffer(m_rsiHandle, 0, 0, 1, rsi) <= 0) return 0;
-        if(CopyBuffer(m_macdHandle, 0, 0, 1, macdMain) <= 0) return 0;
-        if(CopyBuffer(m_macdHandle, 1, 0, 1, macdSignal) <= 0) return 0;
-        if(CopyBuffer(m_bbHandle, 0, 0, 1, middle) <= 0) return 0;
-        if(CopyBuffer(m_bbHandle, 1, 0, 1, upper) <= 0) return 0;
-        if(CopyBuffer(m_bbHandle, 2, 0, 1, lower) <= 0) return 0;
-        if(CopyBuffer(m_maHandle, 0, 0, 1, ma) <= 0) return 0;
+        if(CopyBuffer(m_rsiHandle, 0, 0, 1, m_rsiBuffer) <= 0) return 0;
+        if(CopyBuffer(m_macdHandle, 0, 0, 1, m_macdMainBuffer) <= 0) return 0;
+        if(CopyBuffer(m_macdHandle, 1, 0, 1, m_macdSignalBuffer) <= 0) return 0;
+        if(CopyBuffer(m_bbHandle, 0, 0, 1, m_bbMiddleBuffer) <= 0) return 0;
+        if(CopyBuffer(m_bbHandle, 1, 0, 1, m_bbUpperBuffer) <= 0) return 0;
+        if(CopyBuffer(m_bbHandle, 2, 0, 1, m_bbLowerBuffer) <= 0) return 0;
+        if(CopyBuffer(m_maHandle, 0, 0, 1, m_maBuffer) <= 0) return 0;
 
         double currentPrice = iClose(_Symbol, PERIOD_CURRENT, 0);
 
-        if(rsi[0] < 40 &&
-           macdMain[0] > macdSignal[0] &&
-           currentPrice > ma[0] &&
-           currentPrice < middle[0] &&
+        if(m_rsiBuffer[0] < 40 &&
+           m_macdMainBuffer[0] > m_macdSignalBuffer[0] &&
+           currentPrice > m_maBuffer[0] &&
+           currentPrice < m_bbMiddleBuffer[0] &&
            m_currentRegime != REGIME_TRENDING_BEAR) {
             return 1;
         }
 
-        if(rsi[0] > 60 &&
-           macdMain[0] < macdSignal[0] &&
-           currentPrice < ma[0] &&
-           currentPrice > middle[0] &&
+        if(m_rsiBuffer[0] > 60 &&
+           m_macdMainBuffer[0] < m_macdSignalBuffer[0] &&
+           currentPrice < m_maBuffer[0] &&
+           currentPrice > m_bbMiddleBuffer[0] &&
            m_currentRegime != REGIME_TRENDING_BULL) {
             return -1;
         }
@@ -587,12 +594,10 @@ public:
         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
         double price = (signal > 0) ? ask : bid;
 
-        double atr[];
-        ArraySetAsSeries(atr, true);
-        if(CopyBuffer(m_atrHandle, 0, 0, 1, atr) <= 0) return;
+        if(CopyBuffer(m_atrHandle, 0, 0, 1, m_atrBuffer) <= 0) return;
 
         double atrMultiplier = (m_currentRegime == REGIME_VOLATILE) ? 3.0 : 2.0;
-        double stopDistance = atr[0] * atrMultiplier;
+        double stopDistance = m_atrBuffer[0] * atrMultiplier;
         double tpDistance = stopDistance * 2.0;
 
         double minStopDistance = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
@@ -689,13 +694,11 @@ public:
             }
         }
 
-        double atr[];
-        ArraySetAsSeries(atr, true);
-        if(CopyBuffer(m_atrHandle, 0, 0, 1, atr) <= 0 || atr[0] <= 0) {
-            atr[0] = SymbolInfoDouble(_Symbol, SYMBOL_BID) * 0.001;
+        if(CopyBuffer(m_atrHandle, 0, 0, 1, m_atrBuffer) <= 0 || m_atrBuffer[0] <= 0) {
+            m_atrBuffer[0] = SymbolInfoDouble(_Symbol, SYMBOL_BID) * 0.001;
         }
 
-        double stopDistance = atr[0] * 2.0;
+        double stopDistance = m_atrBuffer[0] * 2.0;
         double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
         double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
 
@@ -727,6 +730,11 @@ public:
     }
 
     void ManageOpenPositions() {
+        // Update ATR once for all positions
+        if(CopyBuffer(m_atrHandle, 0, 0, 1, m_atrBuffer) <= 0) return;
+        double currentATR = m_atrBuffer[0];
+        double trailDistance = currentATR * ((m_currentRegime == REGIME_VOLATILE) ? 3.0 : 2.0);
+
         for(int i = 0; i < MaxPositions; i++) {
             if(m_trades[i].ticket == 0) continue;
 
@@ -748,12 +756,6 @@ public:
             }
 
             m_trades[i].barsInTrade++;
-
-            double atr[];
-            ArraySetAsSeries(atr, true);
-            if(CopyBuffer(m_atrHandle, 0, 0, 1, atr) <= 0) continue;
-
-            double trailDistance = atr[0] * ((m_currentRegime == REGIME_VOLATILE) ? 3.0 : 2.0);
 
             if(m_trades[i].direction > 0) {
                 double newSL = currentPrice - trailDistance;
