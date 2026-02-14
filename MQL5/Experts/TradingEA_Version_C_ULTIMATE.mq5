@@ -22,10 +22,11 @@ void OnTick()
    // ... some logic ...
 
    // Pre-fetch ATR for Breakeven logic
-   // ZENITH OPTIMIZATION: Static allocation, handle check, no redundant API calls.
+   // ZENITH OPTIMIZATION: Hoisted out of loop, handle check, no redundant API calls.
    double currentATR = 0.0;
    if(EnableBreakeven && g_handleATR != INVALID_HANDLE) {
-      static double atr[1];
+      double atr[];
+      ArraySetAsSeries(atr, true);
       if(CopyBuffer(g_handleATR, 0, 0, 1, atr) == 1) {
          currentATR = atr[0];
       }
