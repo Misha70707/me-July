@@ -10,6 +10,7 @@
 
 #include <Trade\Trade.mqh>
 #include <Math\Stat\Math.mqh>
+#include <TinyRecursiveModel.mqh>
 
 //+------------------------------------------------------------------+
 //| Input Parameters - THE ULTIMATE CONFIG                          |
@@ -175,92 +176,6 @@ struct PerformanceStats {
 };
 
 //+------------------------------------------------------------------+
-//| AI Brain - Neural Network                                        |
-//+------------------------------------------------------------------+
-class CNeuralBrain {
-private:
-    double m_weights[20];
-    double m_bias;
-    double m_learningRate;
-    double m_confidence;
-    int    m_patternsLearned;
-    double m_momentum[20];
-
-    double Sigmoid(double x) {
-        return 1.0 / (1.0 + MathExp(-x));
-    }
-
-    double ReLU(double x) {
-        return MathMax(0, x);
-    }
-
-public:
-    CNeuralBrain() {
-        m_learningRate = LearningSpeed / 100.0 * 0.01;
-        m_confidence = 0.5;
-        m_bias = 0;
-        m_patternsLearned = 0;
-
-        // Initialize weights randomly
-        for(int i = 0; i < 20; i++) {
-            m_weights[i] = (MathRand() / 32768.0 - 0.5) * 0.2;
-            m_momentum[i] = 0;
-        }
-    }
-
-    double Predict(double &features[]) {
-        double activation = m_bias;
-
-        int size = MathMin(ArraySize(features), 20);
-        for(int i = 0; i < size; i++) {
-            if(MathIsValidNumber(features[i])) {
-                activation += features[i] * m_weights[i];
-            }
-        }
-
-        // Apply activation function
-        if(EnableDeepLearning) {
-            activation = Sigmoid(activation);
-        } else {
-            activation = ReLU(activation);
-        }
-
-        m_confidence = MathAbs(activation - 0.5) * 2; // 0 to 1
-
-        return activation;
-    }
-
-    void Learn(double &features[], bool wasWin, double profitAmount) {
-        double target = wasWin ? 1.0 : 0.0;
-        double prediction = Predict(features);
-        double error = target - prediction;
-
-        // Backpropagation with momentum
-        int size = MathMin(ArraySize(features), 20);
-        for(int i = 0; i < size; i++) {
-            if(MathIsValidNumber(features[i])) {
-                double gradient = error * features[i];
-                m_momentum[i] = 0.9 * m_momentum[i] + m_learningRate * gradient;
-                m_weights[i] += m_momentum[i];
-
-                // Weight decay (regularization)
-                m_weights[i] *= 0.9999;
-            }
-        }
-
-        m_bias += m_learningRate * error * 0.5;
-        m_patternsLearned++;
-
-        // Update learning rate (decay over time)
-        m_learningRate *= 0.9999;
-        m_learningRate = MathMax(0.0001, m_learningRate);
-    }
-
-    double GetConfidence() { return m_confidence; }
-    int GetPatternsLearned() { return m_patternsLearned; }
-};
-
-//+------------------------------------------------------------------+
 //| Strategy Manager                                                 |
 //+------------------------------------------------------------------+
 class CStrategyManager {
@@ -358,7 +273,7 @@ public:
 //| Global Variables                                                 |
 //+------------------------------------------------------------------+
 CTrade trade;
-CNeuralBrain g_brain;
+CTRMBrain g_brain;
 CStrategyManager g_strategyMgr;
 
 TradeInfo g_trades[];
@@ -395,6 +310,9 @@ int OnInit() {
     for(int i = 0; i < MaxPositions; i++) {
         g_trades[i].Reset();
     }
+
+    // Initialize AI
+    g_brain.Init(20, 12); // 20 features, 12 latent units
 
     // Initialize indicators
     g_handleFastMA = iMA(_Symbol, PERIOD_CURRENT, FastMA_Period, 0, MODE_EMA, PRICE_CLOSE);
@@ -495,8 +413,8 @@ void OnTick() {
     static double features[];
     PrepareFeatures(features, regime);
 
-    // Get AI prediction
-    double aiSignal = g_brain.Predict(features);
+    // Get AI prediction via TRM (Think-Loop)
+    double aiSignal = g_brain.Think(features);
     double confidence = g_brain.GetConfidence();
 
     // Generate strategy signal
