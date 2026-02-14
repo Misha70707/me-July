@@ -5,12 +5,15 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, MetaQuotes Ltd."
 #property link      "https://www.mql5.com"
-#property version   "1.10"
+#property version   "1.20"
 
 #include <Trade\Trade.mqh>
+#include <TinyRecursiveModel.mqh>
 
 // ZENITH STANDARD: Eliminate Magic Numbers
 #define FEATURE_VECTOR_SIZE 20
+#define HIDDEN_STATE_SIZE 16
+#define OUTPUT_SIZE 1
 
 //+------------------------------------------------------------------+
 //| Class CNeuroplasticBrain                                         |
@@ -41,14 +44,11 @@ public:
          ArrayInitialize(features, 0.0);
         }
 
-      // ⚡ OMIT REDUNDANT ZEROING
-      // Previous version called ArrayInitialize(0) here every tick.
-      // Since we overwrite 0..FEATURE_VECTOR_SIZE-1, that was wasted CPU.
-
       // Feature generation loop (Tight loop)
+      // STUB: Replace with real market data indicators
       for(int i=0; i<FEATURE_VECTOR_SIZE; i++)
         {
-         features[i] = (double)i * 1.0001;
+         features[i] = (double)i * 0.01;
         }
 
       return true;
@@ -64,10 +64,18 @@ class CFeatureManager
   {
 private:
    double            m_buffer[]; // Persistent memory, allocated once (mostly)
+   CTinyRecursiveModel m_trm;    // Embedded TRM Model
+   double            m_output[]; // Output buffer
 
 public:
                      CFeatureManager() {}
                     ~CFeatureManager() {}
+
+   void Init()
+     {
+      // Initialize TRM with sizes
+      m_trm.Init(FEATURE_VECTOR_SIZE, HIDDEN_STATE_SIZE, OUTPUT_SIZE, 6); // 6 think steps
+     }
 
    //+------------------------------------------------------------------+
    //| UpdateAndProcess                                                 |
@@ -75,12 +83,19 @@ public:
    //+------------------------------------------------------------------+
    void UpdateAndProcess(CNeuroplasticBrain &brain)
      {
-      // Pass internal buffer to brain.
-      // Memory is reused across ticks.
+      // 1. Extract Features
       if(brain.PrepareFeatures(m_buffer))
         {
-         // Execute Inference / Trading Logic
-         // ...
+         // 2. Run Tiny Recursive Model (Think Loop)
+         m_trm.Predict(m_buffer, m_output);
+
+         // 3. Process Output (Display for now)
+         if(ArraySize(m_output) > 0)
+           {
+            Comment("TRM Output: ", DoubleToString(m_output[0], 5),
+                    "\nThink Steps: 6",
+                    "\nParams: Efficient MGU");
+           }
         }
      }
   };
@@ -94,6 +109,7 @@ CFeatureManager    ExtFeatureManager;
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   ExtFeatureManager.Init();
    return(INIT_SUCCEEDED);
   }
 
@@ -102,6 +118,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   Comment("");
   }
 
 //+------------------------------------------------------------------+
