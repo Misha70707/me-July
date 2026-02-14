@@ -44,6 +44,8 @@ public:
    // Core Functions
    void              AssessEnvironment();
    ENUM_ZENITH_MOOD  GetMood() const { return m_current_mood; }
+   double            GetVolatility() const { return m_volatility_avg; }
+   double            GetLatency() const { return m_latency_avg; }
    string            GetStatusReport();
 
    // Diagnostics
