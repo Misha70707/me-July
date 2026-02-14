@@ -78,6 +78,7 @@ struct ActiveTrade {
     double   stopLoss;
     double   takeProfit;
     int      barsInTrade;
+    double   entryFeatures[20];
 
     void Reset() {
         ticket = 0;
@@ -92,6 +93,7 @@ struct ActiveTrade {
         stopLoss = 0;
         takeProfit = 0;
         barsInTrade = 0;
+        ArrayInitialize(entryFeatures, 0.0);
     }
 };
 
@@ -360,7 +362,7 @@ public:
 
         if(finalSignal != 0 && m_activeTradeCount < MaxPositions) {
             if(CanTrade()) {
-                ExecuteTrade(finalSignal, finalConfidence);
+                ExecuteTrade(finalSignal, finalConfidence, features);
             }
         }
 
@@ -565,7 +567,7 @@ public:
         return true;
     }
 
-    void ExecuteTrade(int signal, double confidence) {
+    void ExecuteTrade(int signal, double confidence, double &features[]) {
         double lotSize = CalculatePositionSize(confidence);
 
         double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -631,6 +633,10 @@ public:
                 m_trades[slot].maxProfit = 0;
                 m_trades[slot].maxDrawdown = 0;
                 m_trades[slot].barsInTrade = 0;
+
+                if(ArraySize(features) == 20) {
+                    ArrayCopy(m_trades[slot].entryFeatures, features);
+                }
 
                 m_activeTradeCount++;
                 m_totalTrades++;
@@ -818,7 +824,8 @@ public:
                           m_trades[index].volume,
                           m_trades[index].direction,
                           netProfit,
-                          m_trades[index].maxDrawdown);
+                          m_trades[index].maxDrawdown,
+                          m_trades[index].entryFeatures);
 
                 if(EnableDiagnostics) {
                     Print("Trade closed. Profit: ", NormalizeDouble(netProfit, 2),

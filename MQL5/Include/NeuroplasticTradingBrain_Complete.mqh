@@ -19,6 +19,7 @@
 #define MOMENTUM_CLAMP          10.0
 #define CACHE_EXPIRY_TICKS      10
 #define CHECKPOINT_MAGIC        0x4E455552  // 'NEUR'
+#define TRM_HIDDEN_SIZE         8           // Zenith: Fixed hidden size for stack alloc
 
 //+------------------------------------------------------------------+
 //| Memory Structure with validation                                |
@@ -36,6 +37,7 @@ struct TradeMemory {
     double   learningValue;
     int      references;
     ulong    checksum;
+    double   features[20]; // Zenith: Store context for replay
 
     void Initialize() {
         timestamp = 0;
@@ -50,6 +52,7 @@ struct TradeMemory {
         learningValue = 0;
         references = 0;
         checksum = 0;
+        ArrayInitialize(features, 0.0);
     }
 
     ulong CalculateChecksum() {
@@ -267,148 +270,210 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Pattern Recognition with validation                             |
+//| Tiny Recursive Model (TRM) with MGU Cells                       |
+//| Replaces shallow perceptron with recursive logic                |
 //+------------------------------------------------------------------+
-class CPatternRecognizer {
+class CTinyRecursiveModel {
 private:
-    double m_weights[];
-    double m_bias;
+    // Hyperparameters
+    const int m_inputSize;
+    const int m_hiddenSize;
+    const int m_outputSize;
+    const int m_recurrenceSteps;
+
+    // Weights (Flattened for O(1) access)
+    // MGU Gates: f (forget), h (hidden candidate)
+    // W_f: [InputSize * HiddenSize]
+    // U_f: [HiddenSize * HiddenSize]
+    // b_f: [HiddenSize]
+    // W_h: [InputSize * HiddenSize]
+    // U_h: [HiddenSize * HiddenSize]
+    // b_h: [HiddenSize]
+    // W_y: [HiddenSize * OutputSize]
+    // b_y: [OutputSize]
+    double m_Wf[], m_Uf[], m_bf[];
+    double m_Wh[], m_Uh[], m_bh[];
+    double m_Wy[], m_by[];
+
+    // State
+    double m_h[];     // Current hidden state (z)
+    double m_y[];     // Current output (y)
     double m_confidence;
-    int    m_patternsRecognized;
-    double m_lastFeatures[];
-    double m_cachedActivation;
-    bool   m_cacheValid;
 
-    bool ValidateFeatures(double &features[]) {
-        int size = ArraySize(features);
-        if(size == 0) return false;
+    // Gradient Accumulators (for batch learning simulation)
+    double m_grad_Wf[], m_grad_Uf[], m_grad_bf[];
+    double m_grad_Wh[], m_grad_Uh[], m_grad_bh[];
+    double m_grad_Wy[], m_grad_by[];
 
-        for(int i = 0; i < size; i++) {
-            if(!MathIsValidNumber(features[i])) {
-                Print("WARNING: Invalid feature at index ", i);
-                features[i] = 0;
-            }
-        }
-        return true;
+    // Math Helpers
+    double Sigmoid(double x) { return 1.0 / (1.0 + MathExp(-x)); }
+    double Tanh(double x) { return MathTanh(x); }
+    double SigmoidDerivative(double x) { double s = Sigmoid(x); return s * (1 - s); }
+    double TanhDerivative(double x) { double t = Tanh(x); return 1 - t * t; }
+
+    void InitializeWeights() {
+        double scale = MathSqrt(2.0 / (m_inputSize + m_hiddenSize));
+        RandomizeArray(m_Wf, scale); RandomizeArray(m_Uf, scale); RandomizeArray(m_bf, 0.01);
+        RandomizeArray(m_Wh, scale); RandomizeArray(m_Uh, scale); RandomizeArray(m_bh, 0.01);
+        RandomizeArray(m_Wy, scale); RandomizeArray(m_by, 0.01);
     }
 
-    bool FeaturesChanged(double &features[]) {
-        int size = ArraySize(features);
-        if(size != ArraySize(m_lastFeatures)) return true;
-
-        for(int i = 0; i < size; i++) {
-            if(MathAbs(features[i] - m_lastFeatures[i]) > 0.00001) {
-                return true;
-            }
+    void RandomizeArray(double &arr[], double scale) {
+        for(int i=0; i<ArraySize(arr); i++) {
+            arr[i] = (MathRand()/32767.0 - 0.5) * 2 * scale;
         }
-        return false;
     }
 
 public:
-    CPatternRecognizer() {
-        ArrayResize(m_weights, 20);
-        ArrayResize(m_lastFeatures, 20);
+    CTinyRecursiveModel() : m_inputSize(20), m_hiddenSize(TRM_HIDDEN_SIZE), m_outputSize(1), m_recurrenceSteps(3) {
+        ArrayResize(m_Wf, m_inputSize * m_hiddenSize);
+        ArrayResize(m_Uf, m_hiddenSize * m_hiddenSize);
+        ArrayResize(m_bf, m_hiddenSize);
+
+        ArrayResize(m_Wh, m_inputSize * m_hiddenSize);
+        ArrayResize(m_Uh, m_hiddenSize * m_hiddenSize);
+        ArrayResize(m_bh, m_hiddenSize);
+
+        ArrayResize(m_Wy, m_hiddenSize * m_outputSize);
+        ArrayResize(m_by, m_outputSize);
+
+        ArrayResize(m_h, m_hiddenSize);
+        ArrayResize(m_y, m_outputSize);
+
         InitializeWeights();
-        m_bias = 0.0;
+        ArrayInitialize(m_h, 0.0);
         m_confidence = 0.5;
-        m_patternsRecognized = 0;
-        m_cacheValid = false;
     }
 
-    void InitializeWeights() {
-        for(int i = 0; i < ArraySize(m_weights); i++) {
-            m_weights[i] = (MathRand() / 32768.0 - 0.5) * 0.1;
-        }
-    }
-
-    double RecognizePattern(double &features[]) {
-        if(!ValidateFeatures(features)) {
+    // Forward Pass: Recursive "Thinking" Loop
+    // Phase 1 (Reasoning): Update z (m_h) multiple times based on x, y, z
+    // Phase 2 (Refinement): Update y (m_y) based on z
+    double Forward(double &features[]) {
+        if(ArraySize(features) != m_inputSize) {
+            // Handle resizing if features changed (dynamic input size)
+            // Ideally avoid dynamic resizing in Zenith standard, but for safety:
             return 0.5;
         }
 
-        if(m_cacheValid && !FeaturesChanged(features)) {
-            return m_cachedActivation;
+        // --- Phase 1: Latent Reasoning (Recursive Steps) ---
+        // z_new = MGU(x, z_old) repeated N times
+        // Note: Standard MGU takes input x_t at each step t.
+        // Here, x is static for the "thinking" duration.
+
+        // Temp buffers for MGU calculation to avoid allocs inside loop
+        double f_gate[TRM_HIDDEN_SIZE]; // Matches m_hiddenSize
+        double h_tilde[TRM_HIDDEN_SIZE];
+
+        for(int step=0; step < m_recurrenceSteps; step++) {
+            // 1. Forget Gate: f = Sigmoid(Wf*x + Uf*h + bf)
+            for(int j=0; j<m_hiddenSize; j++) {
+                double sum = m_bf[j];
+                // Wf * x
+                for(int i=0; i<m_inputSize; i++) {
+                    sum += features[i] * m_Wf[i*m_hiddenSize + j];
+                }
+                // Uf * h
+                for(int k=0; k<m_hiddenSize; k++) {
+                    sum += m_h[k] * m_Uf[k*m_hiddenSize + j];
+                }
+                f_gate[j] = Sigmoid(sum);
+            }
+
+            // 2. Candidate Hidden: h_tilde = Tanh(Wh*x + Uh*(f*h) + bh)
+            for(int j=0; j<m_hiddenSize; j++) {
+                double sum = m_bh[j];
+                // Wh * x
+                for(int i=0; i<m_inputSize; i++) {
+                    sum += features[i] * m_Wh[i*m_hiddenSize + j];
+                }
+                // Uh * (f * h)
+                for(int k=0; k<m_hiddenSize; k++) {
+                    double gated_h = f_gate[k] * m_h[k]; // Element-wise
+                    sum += gated_h * m_Uh[k*m_hiddenSize + j];
+                }
+                h_tilde[j] = Tanh(sum);
+            }
+
+            // 3. Update Hidden State: h = (1-f)*h + f*h_tilde
+            // Note: Standard MGU is (1-f)*h + f*h_tilde OR (1-f)*h_tilde + f*h
+            // Using variant: h_new = (1-f)*h_old + f*h_tilde
+            for(int j=0; j<m_hiddenSize; j++) {
+                m_h[j] = (1.0 - f_gate[j]) * m_h[j] + f_gate[j] * h_tilde[j];
+            }
         }
 
-        double activation = m_bias;
-        int size = MathMin(ArraySize(features), ArraySize(m_weights));
-
-        for(int i = 0; i < size; i++) {
-            activation += features[i] * m_weights[i];
+        // --- Phase 2: Answer Refinement ---
+        // y = Sigmoid(Wy * h + by)
+        double output = 0;
+        for(int j=0; j<m_outputSize; j++) {
+            double sum = m_by[j];
+            for(int i=0; i<m_hiddenSize; i++) {
+                sum += m_h[i] * m_Wy[i*m_outputSize + j];
+            }
+            output = Sigmoid(sum);
+            m_y[j] = output;
         }
 
-        activation = MathMax(-MOMENTUM_CLAMP, MathMin(MOMENTUM_CLAMP, activation));
-
-        double output = 1.0 / (1.0 + MathExp(-activation * m_confidence));
-
-        ArrayCopy(m_lastFeatures, features, 0, 0, size);
-        m_cachedActivation = output;
-        m_cacheValid = true;
-
-        m_patternsRecognized++;
+        // Update confidence based on signal strength (deviation from 0.5)
         UpdateConfidence(output);
 
         return output;
     }
 
-    void Learn(double &features[], double target, double learningRate) {
-        if(!ValidateFeatures(features)) return;
-
-        target = MathMax(0, MathMin(1, target));
-        learningRate = MathMax(MIN_LEARNING_RATE, MathMin(MAX_LEARNING_RATE, learningRate));
-
-        double prediction = RecognizePattern(features);
+    // Simplified Training (Evolutionary / Hebbian-like)
+    // Full BPTT is too heavy for MQL5 without matrix lib.
+    // We update the last layer (Wy) using gradient descent,
+    // and nudge internal weights (Wf, Wh) based on error signal.
+    void Train(double &features[], double target, double learningRate) {
+        double prediction = Forward(features);
         double error = target - prediction;
 
-        error = MathMax(-1, MathMin(1, error));
+        // 1. Update Output Layer (Wy, by)
+        // dL/dy * dy/dz = error * sigmoid_derivative
+        double d_out = error * prediction * (1.0 - prediction);
 
-        int size = MathMin(ArraySize(features), ArraySize(m_weights));
-        double gradientMagnitude = 0;
+        for(int j=0; j<m_outputSize; j++) {
+             m_by[j] += learningRate * d_out;
+             for(int i=0; i<m_hiddenSize; i++) {
+                 // Update weight: delta = lr * error * input(h)
+                 m_Wy[i*m_outputSize + j] += learningRate * d_out * m_h[i];
+                 // Backprop signal to hidden layer (approximate)
+                 // This is a "Feedback Alignment" approximation, robust for online learning
+                 double d_hidden = d_out * m_Wy[i*m_outputSize + j] * (1.0 - m_h[i]*m_h[i]); // Tanh derivative approx
 
-        for(int i = 0; i < size; i++) {
-            double gradient = error * features[i] * prediction * (1 - prediction);
-            gradientMagnitude += gradient * gradient;
+                 // Nudge internal weights slightly towards the gradient
+                 // (Simplified plasticity, not full BPTT)
+                 for(int k=0; k<m_inputSize; k++) {
+                     // Hebbian-like update: correlated input x and hidden error d_hidden
+                     double delta = learningRate * 0.1 * d_hidden * features[k];
+                     m_Wf[k*m_hiddenSize + i] += delta;
+                     m_Wh[k*m_hiddenSize + i] += delta;
+                 }
+             }
         }
-
-        gradientMagnitude = MathSqrt(gradientMagnitude);
-        double gradientScale = gradientMagnitude > 1.0 ? 1.0 / gradientMagnitude : 1.0;
-
-        for(int i = 0; i < size; i++) {
-            double gradient = error * features[i] * prediction * (1 - prediction);
-            m_weights[i] += learningRate * gradient * gradientScale;
-            m_weights[i] = MathMax(-1, MathMin(1, m_weights[i]));
-        }
-
-        m_bias += learningRate * error * prediction * (1 - prediction) * gradientScale;
-        m_bias = MathMax(-1, MathMin(1, m_bias));
-
-        m_cacheValid = false;
     }
 
-    void UpdateConfidence(double accuracy) {
-        accuracy = MathMax(0, MathMin(1, accuracy));
-        m_confidence = m_confidence * 0.95 + accuracy * 0.05;
-        m_confidence = MathMax(0.1, MathMin(1.0, m_confidence));
+    void UpdateConfidence(double output) {
+        // Higher confidence if output is close to 0 or 1
+        double strength = 2.0 * MathAbs(output - 0.5);
+        m_confidence = 0.95 * m_confidence + 0.05 * strength;
     }
 
     double GetConfidence() { return m_confidence; }
 
     void SaveState(int handle) {
-        FileWriteInteger(handle, ArraySize(m_weights));
-        for(int i = 0; i < ArraySize(m_weights); i++) {
-            FileWriteDouble(handle, m_weights[i]);
-        }
-        FileWriteDouble(handle, m_bias);
+        FileWriteArray(handle, m_Wf); FileWriteArray(handle, m_Uf); FileWriteArray(handle, m_bf);
+        FileWriteArray(handle, m_Wh); FileWriteArray(handle, m_Uh); FileWriteArray(handle, m_bh);
+        FileWriteArray(handle, m_Wy); FileWriteArray(handle, m_by);
+        FileWriteArray(handle, m_h);
         FileWriteDouble(handle, m_confidence);
     }
 
     void LoadState(int handle) {
-        int size = FileReadInteger(handle);
-        ArrayResize(m_weights, size);
-        for(int i = 0; i < size; i++) {
-            m_weights[i] = FileReadDouble(handle);
-        }
-        m_bias = FileReadDouble(handle);
+        FileReadArray(handle, m_Wf); FileReadArray(handle, m_Uf); FileReadArray(handle, m_bf);
+        FileReadArray(handle, m_Wh); FileReadArray(handle, m_Uh); FileReadArray(handle, m_bh);
+        FileReadArray(handle, m_Wy); FileReadArray(handle, m_by);
+        FileReadArray(handle, m_h);
         m_confidence = FileReadDouble(handle);
     }
 };
@@ -619,7 +684,7 @@ public:
 //| Global Brain Instance                                           |
 //+------------------------------------------------------------------+
 CMetaLearner* g_metaLearner = NULL;
-CPatternRecognizer* g_patternRecognizer = NULL;
+CTinyRecursiveModel* g_trm = NULL;
 CRiskAssessor* g_riskAssessor = NULL;
 CDecisionMaker* g_decisionMaker = NULL;
 TradeMemory g_memoryBank[];
@@ -630,7 +695,7 @@ int g_memoryCount = 0;
 //+------------------------------------------------------------------+
 bool InitializeNeuroplasticBrain() {
     g_metaLearner = new CMetaLearner();
-    g_patternRecognizer = new CPatternRecognizer();
+    g_trm = new CTinyRecursiveModel();
     g_riskAssessor = new CRiskAssessor();
     g_decisionMaker = new CDecisionMaker();
 
@@ -657,11 +722,11 @@ bool InitializeNeuroplasticBrain() {
 //| Get Brain Signal                                                |
 //+------------------------------------------------------------------+
 int GetBrainSignal(double &features[], double currentDrawdown) {
-    if(g_patternRecognizer == NULL || g_riskAssessor == NULL || g_decisionMaker == NULL) {
+    if(g_trm == NULL || g_riskAssessor == NULL || g_decisionMaker == NULL) {
         return 0;
     }
 
-    double patternScore = g_patternRecognizer.RecognizePattern(features);
+    double patternScore = g_trm.Forward(features);
 
     double volatility = (ArraySize(features) > 1) ? MathAbs(features[1]) : 0.5;
     double profitPotential = patternScore;
@@ -676,15 +741,16 @@ int GetBrainSignal(double &features[], double currentDrawdown) {
 //| Get Brain Confidence                                            |
 //+------------------------------------------------------------------+
 double GetBrainConfidence() {
-    if(g_patternRecognizer == NULL) return 0.5;
-    return g_patternRecognizer.GetConfidence();
+    if(g_trm == NULL) return 0.5;
+    return g_trm.GetConfidence();
 }
 
 //+------------------------------------------------------------------+
 //| Teach Brain from Trade Result                                  |
 //+------------------------------------------------------------------+
 void TeachBrain(datetime entryTime, double entryPrice, double exitPrice,
-                double volume, int direction, double profit, double maxDrawdown) {
+                double volume, int direction, double profit, double maxDrawdown,
+                double &entryFeatures[]) { // Zenith: Added features argument
 
     if(g_memoryCount >= MAX_MEMORY_SIZE) {
         for(int i = 0; i < MAX_MEMORY_SIZE - 1; i++) {
@@ -700,12 +766,29 @@ void TeachBrain(datetime entryTime, double entryPrice, double exitPrice,
     g_memoryBank[g_memoryCount].direction = direction;
     g_memoryBank[g_memoryCount].profit = profit;
     g_memoryBank[g_memoryCount].drawdown = maxDrawdown;
+
+    // Copy features to memory
+    if(ArraySize(entryFeatures) == 20) {
+        ArrayCopy(g_memoryBank[g_memoryCount].features, entryFeatures);
+    }
+
     g_memoryBank[g_memoryCount].checksum = g_memoryBank[g_memoryCount].CalculateChecksum();
     g_memoryCount++;
 
-    if(g_metaLearner != NULL && g_patternRecognizer != NULL && g_riskAssessor != NULL) {
+    if(g_metaLearner != NULL && g_riskAssessor != NULL) {
         double performance = (profit > 0) ? 1.0 : 0.0;
         double learningRate = g_metaLearner.OptimizeLearningRate(performance);
+
+        // Zenith: Online Training Trigger
+        if(g_trm != NULL && ArraySize(entryFeatures) > 0) {
+            // Target: 1.0 for Buy, 0.0 for Sell
+            // If Buy & Profit -> Target 1.0. If Buy & Loss -> Target 0.0
+            // If Sell & Profit -> Target 0.0. If Sell & Loss -> Target 1.0
+            double target = (direction > 0) ? (profit > 0 ? 1.0 : 0.0) : (profit > 0 ? 0.0 : 1.0);
+
+            // Train the TRM immediately (Online Learning)
+            g_trm.Train(entryFeatures, target, learningRate);
+        }
 
         g_riskAssessor.ProcessTradeResult(profit, maxDrawdown);
 
@@ -719,15 +802,15 @@ void TeachBrain(datetime entryTime, double entryPrice, double exitPrice,
 //| Get Brain Diagnostics                                           |
 //+------------------------------------------------------------------+
 string GetBrainDiagnostics() {
-    string report = "=== Brain Diagnostics ===\n";
+    string report = "=== Brain Diagnostics (Zenith TRM) ===\n";
 
     if(g_metaLearner != NULL) {
         report += StringFormat("Learning Rate: %.6f\n", g_metaLearner.GetLearningRate());
     }
 
-    if(g_patternRecognizer != NULL) {
-        report += StringFormat("Pattern Confidence: %.2f%%\n",
-                              g_patternRecognizer.GetConfidence() * 100);
+    if(g_trm != NULL) {
+        report += StringFormat("TRM Confidence: %.2f%%\n",
+                              g_trm.GetConfidence() * 100);
     }
 
     report += StringFormat("Memory Banks: %d/%d\n", g_memoryCount, MAX_MEMORY_SIZE);
@@ -744,9 +827,9 @@ void CleanupBrain() {
         g_metaLearner = NULL;
     }
 
-    if(g_patternRecognizer != NULL) {
-        delete g_patternRecognizer;
-        g_patternRecognizer = NULL;
+    if(g_trm != NULL) {
+        delete g_trm;
+        g_trm = NULL;
     }
 
     if(g_riskAssessor != NULL) {
