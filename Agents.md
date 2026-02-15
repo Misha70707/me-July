@@ -19,7 +19,13 @@ End-to-End Tests: The final verification step is backtesting in the Strategy Tes
 ❗️ NEVER USE "MAGIC NUMBERS". Use input variables for strategy parameters (Slippage, TP/SL). Use built-in enumerations (ORDER_TYPE_BUY). Every EA must have a unique input ulong MagicNumber to isolate its trades.
 ❗️ NEVER RECALCULATE STATIC DATA ON EVERY TICK. Implement new-bar detection logic. Indicator values and historical data analysis must only be run once per bar. The only logic permissible on every tick is for rapid management tasks like trailing stops.
 
+
 ❗️ NEVER IGNORE RETURN VALUES. Every MQL5 function that retrieves data (CopyRates(), iMA(), OrderSelect(), etc.) can fail. You must check the return value of every such call before using the resulting data. Assume data is invalid until proven valid.
+
+
+
+❗️ NEVER ALLOCATE MEMORY ON EVERY TICK. Avoid `ArrayResize`, `new`, or large object creation inside `OnTick`. Use pre-allocated member variables or static arrays initialized in `OnInit` to prevent heap fragmentation and latency spikes.
+
 
 5. OPERATIONAL ENVIRONMENT RECOMMENDATIONTo ensure maximum performance, stability, and adherence to non-blocking principles, all deployed agents should operate from a high-performance, low-latency environment. Emulate the total control and efficiency of a Master Control Program (MCP) by utilizing a dedicated Virtual Private Server (VPS) located in close proximity to the broker's servers. This minimizes network latency, a common cause of trade request failures.
 [neuronetworksbook.pdf](https://github.com/user-attachments/files/22894311/neuronetworksbook.pdf)
