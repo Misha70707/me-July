@@ -1,0 +1,4 @@
+## 2024-10-31 - [Jinja2 Autoescape Disabled by Default]
+**Vulnerability:** `generate_context.py` initialized `jinja2.Environment` without `autoescape=True`. This allowed malicious dependency strings (e.g., `<script>alert(1)</script>`) in `requirements.txt` to be rendered as raw HTML in the generated `Agents.md` and `Readme.md` files, creating a Stored XSS vulnerability.
+**Learning:** Even internal documentation generation tools can be attack vectors if they process untrusted input (like `requirements.txt` which might be modified by a malicious actor or contain malicious package names). Jinja2's default behavior is insecure for HTML output unless `autoescape` is explicitly enabled.
+**Prevention:** Always initialize `jinja2.Environment` with `autoescape=True` when generating content that might be rendered as HTML, especially if it includes data from external files.
