@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+Agents.md
+Readme.md
+.venv/
