@@ -6,6 +6,17 @@ from jinja2 import Environment, FileSystemLoader
 
 # --- 1. ANALYSIS FUNCTIONS ---
 
+class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 def find_project_root():
     """Finds the root of the project by looking for .git or a common file."""
     current_dir = Path.cwd()
@@ -66,17 +77,24 @@ def analyze_python_code(root_path):
 
 def main():
     """Main function to generate the context files."""
+    print(f"{Colors.HEADER}🚀 Starting Project Context Generator...{Colors.ENDC}")
     project_root = find_project_root()
     project_name = project_root.name
-    print(f"Scanning project at: {project_root}")
+    print(f"{Colors.OKBLUE}🔍 Scanning project structure at: {Colors.ENDC}{project_root}")
 
     # --- Gather Context ---
     structure = scan_project_structure(project_root)
+
+    print(f"{Colors.OKBLUE}🧠 Analyzing dependencies and code...{Colors.ENDC}")
     tech_stack, dependencies = parse_dependencies(project_root)
     code_elements = analyze_python_code(project_root)
 
     # --- Template Rendering ---
-    env = Environment(loader=FileSystemLoader(project_root), autoescape=True)
+    # Fix: Include the script's directory in the template loader path so templates are found
+    script_dir = Path(__file__).resolve().parent
+    env = Environment(loader=FileSystemLoader([project_root, script_dir]), autoescape=True)
+
+    print(f"{Colors.OKBLUE}📝 Rendering documentation...{Colors.ENDC}")
 
     # Define some default rules and workflow
     mandatory_rules = [
@@ -116,9 +134,17 @@ def main():
     with open(project_root / "Readme.md", "w") as f:
         f.write(readme_template.render(readme_context))
 
-    print("\n✅ Documentation generated successfully!")
-    print("   - Readme.md")
-    print("   - Agents.md")
+    print(f"\n{Colors.OKGREEN}✅ Documentation generated successfully!{Colors.ENDC}")
+
+    # Project Summary
+    print(f"\n{Colors.BOLD}📊 Project Summary:{Colors.ENDC}")
+    print(f"   • Tech Stack: {', '.join(tech_stack) if tech_stack else 'Unknown'}")
+    print(f"   • Dependencies: {len(dependencies)}")
+    print(f"   • Python Classes: {len(code_elements['classes'])}")
+    print(f"   • Python Functions: {len(code_elements['functions'])}")
+    print("   • Output Files:")
+    print(f"     - {project_root / 'Readme.md'}")
+    print(f"     - {project_root / 'Agents.md'}")
 
 if __name__ == "__main__":
     main()
