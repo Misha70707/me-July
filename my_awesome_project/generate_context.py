@@ -4,6 +4,8 @@ import ast
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
+MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB limit for file reading
+
 # --- 1. ANALYSIS FUNCTIONS ---
 
 def find_project_root():
@@ -33,14 +35,20 @@ def parse_dependencies(root_path):
 
     req_file = root_path / 'requirements.txt'
     if req_file.exists():
-        tech_stack.append("Python")
-        with open(req_file, 'r') as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        if req_file.stat().st_size > MAX_FILE_SIZE:
+            print(f"⚠️ Skipping large file: {req_file.name} (> {MAX_FILE_SIZE} bytes)")
+        else:
+            tech_stack.append("Python")
+            with open(req_file, 'r') as f:
+                dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
     pkg_file = root_path / 'package.json'
     if pkg_file.exists():
-        tech_stack.append("Node.js / JavaScript")
-        # You could add a JSON parser here to get more details
+        if pkg_file.stat().st_size > MAX_FILE_SIZE:
+            print(f"⚠️ Skipping large file: {pkg_file.name} (> {MAX_FILE_SIZE} bytes)")
+        else:
+            tech_stack.append("Node.js / JavaScript")
+            # You could add a JSON parser here to get more details
 
     return tech_stack, dependencies
 
@@ -51,6 +59,10 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            if py_file.stat().st_size > MAX_FILE_SIZE:
+                print(f"⚠️ Skipping large file: {py_file.name} (> {MAX_FILE_SIZE} bytes)")
+                continue
+
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
