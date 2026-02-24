@@ -68,15 +68,28 @@ def main():
     """Main function to generate the context files."""
     project_root = find_project_root()
     project_name = project_root.name
-    print(f"Scanning project at: {project_root}")
+    print(f"🚀 Starting documentation generation for: {project_name}")
+    print(f"📂 Project root: {project_root}")
 
     # --- Gather Context ---
+    print("\n🔍 Scanning project structure...")
     structure = scan_project_structure(project_root)
+    print(f"   Found {len(structure)} directories/files.")
+
+    print("📦 Analyzing dependencies...")
     tech_stack, dependencies = parse_dependencies(project_root)
+    print(f"   Detected stack: {', '.join(tech_stack) if tech_stack else 'None'}")
+
+    print("🧠 Analyzing Python code...")
     code_elements = analyze_python_code(project_root)
+    classes_count = len(code_elements.get('classes', []))
+    functions_count = len(code_elements.get('functions', []))
+    print(f"   Found {classes_count} classes and {functions_count} functions.")
 
     # --- Template Rendering ---
-    env = Environment(loader=FileSystemLoader(project_root), autoescape=True)
+    print("\n📝 Generating documentation files...")
+    script_dir = Path(__file__).parent
+    env = Environment(loader=FileSystemLoader(script_dir), autoescape=True)
 
     # Define some default rules and workflow
     mandatory_rules = [
@@ -117,8 +130,8 @@ def main():
         f.write(readme_template.render(readme_context))
 
     print("\n✅ Documentation generated successfully!")
-    print("   - Readme.md")
-    print("   - Agents.md")
+    print(f"   - {project_root / 'Readme.md'}")
+    print(f"   - {project_root / 'Agents.md'}")
 
 if __name__ == "__main__":
     main()
