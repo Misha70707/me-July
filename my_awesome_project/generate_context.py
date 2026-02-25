@@ -8,7 +8,8 @@ from jinja2 import Environment, FileSystemLoader
 
 def find_project_root():
     """Finds the root of the project by looking for .git or a common file."""
-    current_dir = Path.cwd()
+    # Start searching from the script's location, not the current working directory
+    current_dir = Path(__file__).resolve().parent
     while current_dir != current_dir.parent:
         if (current_dir / '.git').is_dir() or (current_dir / 'package.json').is_file() or (current_dir / 'requirements.txt').is_file():
             return current_dir
@@ -19,11 +20,29 @@ def scan_project_structure(root_path):
     """Scans the directory and returns a structured representation."""
     structure = {}
     ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.vscode'}
+    MAX_FILE_SIZE = 1024 * 1024  # 1MB limit
+
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [d for d in dirs if d not in ignore_dirs]
         level = root.replace(str(root_path), '').count(os.sep)
         indent = ' ' * 2 * level
-        structure[f"{indent}{os.path.basename(root)}/"] = [f for f in files if not f.startswith('.')]
+
+        valid_files = []
+        for f in files:
+            if f.startswith('.'):
+                continue
+
+            full_path = Path(root) / f
+            try:
+                file_size = full_path.stat().st_size
+                if file_size > MAX_FILE_SIZE:
+                    print(f"   ⚠️  Skipping large file: {f} ({file_size/1024:.1f} KB)")
+                    continue
+            except OSError:
+                pass
+            valid_files.append(f)
+
+        structure[f"{indent}{os.path.basename(root)}/"] = valid_files
     return structure
 
 def parse_dependencies(root_path):
@@ -59,7 +78,7 @@ def analyze_python_code(root_path):
                 if isinstance(node, ast.FunctionDef):
                     code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
         except Exception as e:
-            print(f"Could not parse {py_file}: {e}")
+            print(f"   ⚠️  Error parsing {py_file.name}: {e}")
     return code_elements
 
 # --- 2. MAIN EXECUTION ---
@@ -68,15 +87,31 @@ def main():
     """Main function to generate the context files."""
     project_root = find_project_root()
     project_name = project_root.name
-    print(f"Scanning project at: {project_root}")
+    print(f"🔍 Scanning project at: {project_root}...")
 
     # --- Gather Context ---
     structure = scan_project_structure(project_root)
+    num_dirs = len(structure)
+    num_files = sum(len(files) for files in structure.values())
+    print(f"   - Found {num_dirs} directories")
+    print(f"   - Found {num_files} files")
+
+    print(f"\n📦 Analyzing dependencies...")
     tech_stack, dependencies = parse_dependencies(project_root)
+    if tech_stack:
+        print(f"   - Detected: {', '.join(tech_stack)}")
+    print(f"   - Found {len(dependencies)} dependencies")
+
+    print(f"\n🧠 Analyzing Python code...")
     code_elements = analyze_python_code(project_root)
+    print(f"   - Found {len(code_elements['classes'])} classes")
+    print(f"   - Found {len(code_elements['functions'])} functions")
 
     # --- Template Rendering ---
-    env = Environment(loader=FileSystemLoader(project_root), autoescape=True)
+    print(f"\n📝 Generating documentation...")
+    # Load templates from the script directory, not the project root
+    script_dir = Path(__file__).resolve().parent
+    env = Environment(loader=FileSystemLoader(script_dir), autoescape=True)
 
     # Define some default rules and workflow
     mandatory_rules = [
