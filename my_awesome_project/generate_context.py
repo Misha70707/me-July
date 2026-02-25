@@ -51,6 +51,12 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            # Security: Check file size to prevent DoS
+            file_stats = os.stat(py_file)
+            if file_stats.st_size > 1024 * 1024:  # 1MB limit
+                print(f"⚠️ Skipping large file: {py_file} ({file_stats.st_size} bytes)")
+                continue
+
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
