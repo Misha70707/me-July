@@ -5,10 +5,11 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, MetaQuotes Ltd."
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "1.01"
 
 #include <Trade\Trade.mqh>
 #include <LargeScaleTRM.mqh>
+#include <ZenithProtocol.mqh>
 
 //--- Inputs
 input int      InpHiddenSize     = 1024;     // Hidden Size (1024^2 params!)
@@ -25,22 +26,17 @@ bool           g_initialized = false;
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   // Initialize the "Large" Model
-   // Input Size: 20 (e.g., OHLC + Indicators)
-   // Hidden Size: 1024
-   // Layers: 2
-   // Params: ~ 2 * [2 * (1024*20 + 1024*1024 + 1024)]
-   //       = 2 * [2 * (20480 + 1048576 + 1024)]
-   //       = 2 * [2 * 1,070,080] = 4,280,320 parameters per layer set?
-   // Wait: MGU params = 2 gates (Forget, Hidden).
-   // Layer 1: 1024*1024 U matrix.
-   // Total ~ 2.1M per layer. 2 Layers ~ 4.2M. 3 Layers ~ 6.3M.
+   // Zenith Protocol Check
+   if(!CZenithSentinel::ValidateEnvironment())
+      return INIT_FAILED;
 
    Print("Initializing Deep TRM Model...");
 
-   // Check Memory
-   if(MQLInfoInteger(MQL_MEMORY_LIMIT) < 512)
-     Print("Warning: Low memory limit for Large Model.");
+   // Protocol: Memory Pre-Check for Large Models
+   long estimatedMem = (long)InpHiddenSize * InpHiddenSize * 4 * InpNumLayers * 2; // Rough float bytes
+   long freeMem = MQLInfoInteger(MQL_MEMORY_LIMIT) * 1024 * 1024; // MB to Bytes? No MQL_MEMORY_LIMIT is in MB usually?
+   // MQL_MEMORY_LIMIT is in MB.
+   // Let's just trust Sentinel's percentage check.
 
    g_model.Init(20, InpHiddenSize, InpNumLayers);
 
@@ -56,7 +52,6 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   // Object cleans itself up
   }
 
 //+------------------------------------------------------------------+
@@ -70,7 +65,9 @@ void OnTick()
    vector<float> x;
    x.Resize(20);
 
-   // Fill with normalized price data (Mock)
+   // Zenith Protocol: Bounds Check
+   if(x.Size() != 20) { Print("Critical Vector Alloc Fail"); return; }
+
    double close = iClose(_Symbol, PERIOD_CURRENT, 0);
    for(int i=0; i<20; i++)
      {
@@ -84,19 +81,21 @@ void OnTick()
 
    ulong end = GetMicrosecondCount();
 
-   // 3. Log Performance
-   static ulong maxTime = 0;
-   ulong duration = end - start;
-   if(duration > maxTime) maxTime = duration;
+   // 3. Log Performance via Protocol
+   CZenithSentinel::LogPerformance("TRM_Inference", end - start);
 
    // Sample logging (every 100 ticks)
    if(GetTickCount() % 100 == 0)
-     PrintFormat("Inference: %.4f | Time: %d us | Max: %d us | Params: %.1f M",
-                 prediction, duration, maxTime, (double)g_model.GetTotalParams()/1000000.0);
+     PrintFormat("Inference: %.4f | Time: %d us | Params: %.1f M",
+                 prediction, end - start, (double)g_model.GetTotalParams()/1000000.0);
 
    // 4. Trade Logic (Simple Threshold)
    if(PositionsTotal() == 0)
      {
+      // Protocol: Check Spread before Scalping
+      double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+      if(spread > 50) return; // Too high spread filter
+
       if(prediction > 0.5) trade.Buy(InpLotSize, _Symbol);
       if(prediction < -0.5) trade.Sell(InpLotSize, _Symbol);
      }

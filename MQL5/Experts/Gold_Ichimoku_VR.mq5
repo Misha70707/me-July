@@ -5,11 +5,12 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, MetaQuotes Ltd."
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "1.01"
 
 #include <Trade\Trade.mqh>
 #include <AdaptiveIchimoku.mqh>
 #include <RecursiveOptimizer.mqh>
+#include <ZenithProtocol.mqh> // Integrated Protocol
 
 //--- Inputs
 input double   InpLotSize        = 0.1;      // Lot Size
@@ -24,12 +25,22 @@ CTrade               trade;
 CAdaptiveIchimoku    ichiEngine;
 CRecursiveOptimizer  optimizer;
 int                  barsCounter = 0;
+bool                 g_protocolSafe = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   // 1. Zenith Protocol Validation
+   if(!CZenithSentinel::ValidateEnvironment())
+     {
+      Print("Zenith Protocol: Environment Validation Failed. Expert Stopped.");
+      return INIT_FAILED;
+     }
+   g_protocolSafe = true;
+
+   // 2. Component Initialization
    if(!ichiEngine.Init(InpBaseTenkan, InpBaseKijun, InpBaseSenkou))
       return INIT_FAILED;
 
@@ -45,6 +56,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   g_protocolSafe = false;
   }
 
 //+------------------------------------------------------------------+
@@ -52,7 +64,12 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   // 1. Check New Bar (Optimization: Only run heavy logic on new bar or trailing stop updates)
+   // Protocol Gate
+   if(!g_protocolSafe) return;
+
+   ulong startT = GetMicrosecondCount();
+
+   // 1. Check New Bar
    static datetime lastBar = 0;
    datetime currentBar = iTime(_Symbol, PERIOD_CURRENT, 0);
    bool isNewBar = (lastBar != currentBar);
@@ -69,6 +86,9 @@ void OnTick()
       // Check Entries
       CheckEntry();
      }
+
+   ulong endT = GetMicrosecondCount();
+   CZenithSentinel::LogPerformance("OnTick", endT - startT);
   }
 
 //+------------------------------------------------------------------+
@@ -98,41 +118,30 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
 //+------------------------------------------------------------------+
 void CheckEntry()
   {
-   // Filter: Pause if Optimizer says so
    if(optimizer.ShouldPauseTrading()) return;
-
-   // Filter: Only 1 position
    if(PositionsTotal() > 0) return;
 
    ENUM_ICHI_STATE state = ichiEngine.GetState();
    int barsInState = ichiEngine.GetBarsInState();
 
-   // Requirement: "Require minimum 1 bar after state change confirmation"
    if(barsInState < 1) return;
 
    double price = iClose(_Symbol, PERIOD_CURRENT, 0);
    double tenkan = ichiEngine.GetTenkan(0);
 
-   // Dynamic Lot Logic
    double lot = InpLotSize;
    if(optimizer.ShouldReduceRisk()) lot = InpLotSize * 0.5;
 
+   // Zenith Protocol: Bounds Check on Lot
+   if(lot <= 0) lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+
    if(state == STATE_BULLISH)
      {
-      // "Entry only when price penetrates Tenkan-sen in confirmed direction"
-      // Price > Tenkan
-      if(price > tenkan)
-        {
-         OpenTrade(ORDER_TYPE_BUY, lot);
-        }
+      if(price > tenkan) OpenTrade(ORDER_TYPE_BUY, lot);
      }
    else if(state == STATE_BEARISH)
      {
-      // Price < Tenkan
-      if(price < tenkan)
-        {
-         OpenTrade(ORDER_TYPE_SELL, lot);
-        }
+      if(price < tenkan) OpenTrade(ORDER_TYPE_SELL, lot);
      }
   }
 
@@ -141,7 +150,6 @@ void CheckEntry()
 //+------------------------------------------------------------------+
 void OpenTrade(ENUM_ORDER_TYPE type, double vol)
   {
-   // Kumo Thickness Calculation
    double thickness = ichiEngine.GetKumoThickness(0);
    double senkouA = ichiEngine.GetSenkouA(0);
    double senkouB = ichiEngine.GetSenkouB(0);
@@ -151,18 +159,12 @@ void OpenTrade(ENUM_ORDER_TYPE type, double vol)
    double entryPrice = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = 0;
 
-   // Dynamic SL
-   // Formula: Kumo_Buffer = 10 + (Thickness * 0.5)
-   // Optimizer scales this buffer
-   double baseBuffer = 10 + (thickness / _Point * 0.5); // Convert thickness to points approx or assume price diff
-   // Let's stick to Price Diff for thickness
    double bufferPips = (10 * _Point) + (thickness * 0.5);
    bufferPips *= optimizer.GetKumoBufferAdjustment();
 
    if(type == ORDER_TYPE_BUY)
      {
       sl = kumoLower - bufferPips;
-      // Cap Risk
       if(entryPrice - sl > InpMaxRiskPips * _Point) sl = entryPrice - (InpMaxRiskPips * _Point);
      }
    else
@@ -172,6 +174,9 @@ void OpenTrade(ENUM_ORDER_TYPE type, double vol)
      }
 
    double riskDist = MathAbs(entryPrice - sl);
+   // Zenith Protocol: Safety Check for Zero Risk Distance
+   if(riskDist < _Point) riskDist = 10 * _Point;
+
    double tp = (type == ORDER_TYPE_BUY) ? entryPrice + (riskDist * InpRiskReward) : entryPrice - (riskDist * InpRiskReward);
 
    trade.PositionOpen(_Symbol, type, vol, entryPrice, sl, tp);
@@ -182,7 +187,6 @@ void OpenTrade(ENUM_ORDER_TYPE type, double vol)
 //+------------------------------------------------------------------+
 void ManagePositions()
   {
-   // Update stop-loss every 5 bars
    if(barsCounter++ < 5) return;
    barsCounter = 0;
 
@@ -191,10 +195,6 @@ void ManagePositions()
       ulong ticket = PositionGetTicket(i);
       if(ticket > 0)
         {
-         // Simple Break-Even / Trailing logic based on decreased volatility could go here
-         // Requirement: "Move stop closer to break-even if volatility decreases"
-         // Implemented as standard trailing for safety in this version:
-
          double sl = PositionGetDouble(POSITION_SL);
          double open = PositionGetDouble(POSITION_PRICE_OPEN);
          double current = PositionGetDouble(POSITION_PRICE_CURRENT);
@@ -202,7 +202,6 @@ void ManagePositions()
 
          double profitPips = (type == POSITION_TYPE_BUY) ? (current - open) : (open - current);
 
-         // If Profit > Risk distance, move to BE
          if(profitPips > MathAbs(open - sl))
            {
              double newSL = open;
@@ -210,7 +209,6 @@ void ManagePositions()
              if(type == POSITION_TYPE_SELL && sl > newSL) trade.PositionModify(ticket, newSL, PositionGetDouble(POSITION_TP));
            }
 
-         // State Reversal Exit
          ENUM_ICHI_STATE state = ichiEngine.GetState();
          if(type == POSITION_TYPE_BUY && state == STATE_BEARISH) trade.PositionClose(ticket);
          if(type == POSITION_TYPE_SELL && state == STATE_BULLISH) trade.PositionClose(ticket);
