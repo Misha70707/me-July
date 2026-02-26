@@ -8,7 +8,7 @@ from jinja2 import Environment, FileSystemLoader
 
 def find_project_root():
     """Finds the root of the project by looking for .git or a common file."""
-    current_dir = Path.cwd()
+    current_dir = Path(__file__).resolve().parent
     while current_dir != current_dir.parent:
         if (current_dir / '.git').is_dir() or (current_dir / 'package.json').is_file() or (current_dir / 'requirements.txt').is_file():
             return current_dir
@@ -51,6 +51,10 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            if py_file.stat().st_size > 1_000_000:
+                print(f"⚠️  Skipping large file: {py_file.name}")
+                continue
+
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
@@ -68,14 +72,19 @@ def main():
     """Main function to generate the context files."""
     project_root = find_project_root()
     project_name = project_root.name
-    print(f"Scanning project at: {project_root}")
+    print(f"🔍 Scanning project at: {project_root}")
 
     # --- Gather Context ---
     structure = scan_project_structure(project_root)
+
+    print("📦 Parsing dependencies...")
     tech_stack, dependencies = parse_dependencies(project_root)
+
+    print("🧠 Analyzing Python code...")
     code_elements = analyze_python_code(project_root)
 
     # --- Template Rendering ---
+    print("📝 Generating documentation...")
     env = Environment(loader=FileSystemLoader(project_root), autoescape=True)
 
     # Define some default rules and workflow
