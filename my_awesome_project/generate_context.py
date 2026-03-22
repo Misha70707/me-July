@@ -44,6 +44,21 @@ def parse_dependencies(root_path):
 
     return tech_stack, dependencies
 
+
+class _ElementVisitor(ast.NodeVisitor):
+    def __init__(self, filename):
+        self.filename = filename
+        self.classes = []
+        self.functions = []
+
+    def visit_ClassDef(self, node):
+        self.classes.append(f"{node.name} (in {self.filename})")
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node):
+        self.functions.append(f"{node.name}() (in {self.filename})")
+        self.generic_visit(node)
+
 def analyze_python_code(root_path):
     """Uses AST to find classes and functions in Python files."""
     code_elements = {"classes": [], "functions": []}
@@ -53,11 +68,10 @@ def analyze_python_code(root_path):
         try:
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    code_elements["classes"].append(f"{node.name} (in {py_file.name})")
-                if isinstance(node, ast.FunctionDef):
-                    code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
+            visitor = _ElementVisitor(py_file.name)
+            visitor.visit(tree)
+            code_elements["classes"].extend(visitor.classes)
+            code_elements["functions"].extend(visitor.functions)
         except Exception as e:
             print(f"Could not parse {py_file}: {e}")
     return code_elements
