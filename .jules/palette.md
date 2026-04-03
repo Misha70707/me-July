@@ -1,0 +1,3 @@
+## 2025-04-03 - CLI System Visibility & Explicit Warnings
+**Learning:** CLI tools, even utility scripts, require structured status messages with clear visual cues (like emojis) and explicit warnings when silently skipping items (e.g., large files) to improve system visibility and user trust. Users shouldn't be left hanging or wondering if an operation succeeded or was skipped.
+**Action:** When creating or modifying CLI tools, ensure that the execution flow is visible through distinct status messages. If a process silently skips items or encounters non-fatal errors, surface this clearly using warnings (`⚠️ `) so users are informed about the constraints applied to their operation.
