@@ -50,6 +50,15 @@ def analyze_python_code(root_path):
     for py_file in root_path.rglob("*.py"):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
+
+        # Skip files larger than 1MB to prevent memory issues and hangs
+        try:
+            if os.path.getsize(py_file) > 1024 * 1024:
+                print(f"⚠️  Skipping large file: {py_file.name} (> 1MB)")
+                continue
+        except OSError:
+            pass # File might have been deleted or inaccessible
+
         try:
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
@@ -59,7 +68,7 @@ def analyze_python_code(root_path):
                 if isinstance(node, ast.FunctionDef):
                     code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
         except Exception as e:
-            print(f"Could not parse {py_file}: {e}")
+            print(f"⚠️  Could not parse {py_file.name}: {e}")
     return code_elements
 
 # --- 2. MAIN EXECUTION ---
@@ -68,14 +77,19 @@ def main():
     """Main function to generate the context files."""
     project_root = find_project_root()
     project_name = project_root.name
-    print(f"Scanning project at: {project_root}")
+    print(f"🔍 Scanning project at: {project_root}")
 
     # --- Gather Context ---
     structure = scan_project_structure(project_root)
+
+    print("🛠️  Analyzing dependencies...")
     tech_stack, dependencies = parse_dependencies(project_root)
+
+    print("🧠 Analyzing Python code...")
     code_elements = analyze_python_code(project_root)
 
     # --- Template Rendering ---
+    print("📝 Generating documentation...")
     env = Environment(loader=FileSystemLoader(project_root), autoescape=True)
 
     # Define some default rules and workflow
