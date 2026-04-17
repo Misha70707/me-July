@@ -50,6 +50,17 @@ def analyze_python_code(root_path):
     for py_file in root_path.rglob("*.py"):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
+
+        try:
+            # Enforce 1MB file size limit to prevent DoS via Uncontrolled Resource Consumption
+            file_size = py_file.stat().st_size
+            if file_size > 1024 * 1024:
+                print(f"⚠️ Skipping large file {py_file} ({file_size} bytes)")
+                continue
+        except OSError as e:
+            print(f"Could not stat {py_file}: {e}")
+            continue
+
         try:
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
