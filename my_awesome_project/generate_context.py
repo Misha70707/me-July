@@ -47,19 +47,27 @@ def parse_dependencies(root_path):
 def analyze_python_code(root_path):
     """Uses AST to find classes and functions in Python files."""
     code_elements = {"classes": [], "functions": []}
-    for py_file in root_path.rglob("*.py"):
-        if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
-            continue
-        try:
-            with open(py_file, 'r', encoding='utf-8') as f:
-                tree = ast.parse(f.read(), filename=str(py_file))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    code_elements["classes"].append(f"{node.name} (in {py_file.name})")
-                if isinstance(node, ast.FunctionDef):
-                    code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
-        except Exception as e:
-            print(f"Could not parse {py_file}: {e}")
+    # Performance optimization: use os.walk with in-place pruning instead of rglob
+    # to avoid traversing ignored directories.
+    ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.vscode'}
+    for root, dirs, files in os.walk(root_path):
+        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        for file in files:
+            if file.endswith('.py'):
+                py_file = Path(root) / file
+                try:
+                    # Security Control: Limit file size to prevent DoS via Uncontrolled Resource Consumption
+                    if py_file.stat().st_size > 1024 * 1024:
+                        continue
+                    with open(py_file, 'r', encoding='utf-8') as f:
+                        tree = ast.parse(f.read(), filename=str(py_file))
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.ClassDef):
+                            code_elements["classes"].append(f"{node.name} (in {py_file.name})")
+                        if isinstance(node, ast.FunctionDef):
+                            code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
+                except Exception as e:
+                    print(f"Could not parse {py_file}: {e}")
     return code_elements
 
 # --- 2. MAIN EXECUTION ---
