@@ -19,11 +19,30 @@ def scan_project_structure(root_path):
     """Scans the directory and returns a structured representation."""
     structure = {}
     ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.vscode'}
-    for root, dirs, files in os.walk(root_path):
-        dirs[:] = [d for d in dirs if d not in ignore_dirs]
-        level = root.replace(str(root_path), '').count(os.sep)
+
+    # Use os.scandir recursively for improved performance over os.walk
+    def _scan(path, level):
         indent = ' ' * 2 * level
-        structure[f"{indent}{os.path.basename(root)}/"] = [f for f in files if not f.startswith('.')]
+        try:
+            with os.scandir(path) as entries:
+                files = []
+                dirs = []
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in ignore_dirs:
+                            dirs.append(entry)
+                    elif entry.is_file(follow_symlinks=False):
+                        if not entry.name.startswith('.'):
+                            files.append(entry.name)
+
+                structure[f"{indent}{os.path.basename(path)}/"] = files
+
+                for d in dirs:
+                    _scan(d.path, level + 1)
+        except PermissionError:
+            pass
+
+    _scan(str(root_path), 0)
     return structure
 
 def parse_dependencies(root_path):
