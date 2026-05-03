@@ -1,0 +1,3 @@
+## 2024-05-23 - [Analyze Python Code Optimization]
+**Learning:** `Path.rglob("*.py")` is a performance bottleneck when scanning projects with large generated or ignored directories (like `venv` or `node_modules`). `rglob` explores the entire directory tree unconditionally before yielding matches, resulting in extensive disk I/O and wasted iteration even if the path is later skipped.
+**Action:** Replace `Path.rglob` with `os.walk` and use in-place directory list mutation (`dirs[:] = [d for d in dirs if d not in ignore_dirs]`) to prune the traversal early at the directory level, significantly reducing iteration time in large projects.
