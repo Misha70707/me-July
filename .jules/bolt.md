@@ -1,0 +1,3 @@
+## 2024-05-23 - Optimize Python File Scanning
+**Learning:** Using `Path.rglob` for filesystem traversal is inefficient in large projects because it cannot prune ignored directories (like `venv` or `node_modules`) during traversal, leading to massive I/O overhead before filtering.
+**Action:** Always prefer `os.walk` with in-place directory list mutation (`dirs[:] = ...`) when scanning files in repositories with large dependency directories, avoiding O(n) traversal of ignored subtrees.
