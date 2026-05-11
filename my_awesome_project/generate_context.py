@@ -35,7 +35,8 @@ def parse_dependencies(root_path):
     if req_file.exists():
         tech_stack.append("Python")
         with open(req_file, 'r') as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            # ⚡ Bolt Optimization: Use walrus operator to avoid calling line.strip() twice per line
+            dependencies = [stripped for line in f if (stripped := line.strip()) and not stripped.startswith('#')]
 
     pkg_file = root_path / 'package.json'
     if pkg_file.exists():
