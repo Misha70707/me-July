@@ -34,8 +34,9 @@ def parse_dependencies(root_path):
     req_file = root_path / 'requirements.txt'
     if req_file.exists():
         tech_stack.append("Python")
-        with open(req_file, 'r') as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        if req_file.stat().st_size <= 1048576:
+            with open(req_file, 'r') as f:
+                dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
     pkg_file = root_path / 'package.json'
     if pkg_file.exists():
@@ -51,6 +52,8 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            if py_file.stat().st_size > 1048576:
+                continue
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
