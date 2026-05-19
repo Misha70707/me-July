@@ -34,13 +34,22 @@ def parse_dependencies(root_path):
     req_file = root_path / 'requirements.txt'
     if req_file.exists():
         tech_stack.append("Python")
-        with open(req_file, 'r') as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        # Security: Enforce 1MB file size limit to prevent Uncontrolled Resource Consumption (DoS)
+        if req_file.stat().st_size > 1048576:
+            print(f"Skipping {req_file}: File too large")
+        else:
+            with open(req_file, 'r') as f:
+                dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
     pkg_file = root_path / 'package.json'
     if pkg_file.exists():
         tech_stack.append("Node.js / JavaScript")
-        # You could add a JSON parser here to get more details
+        # Security: Enforce 1MB file size limit to prevent Uncontrolled Resource Consumption (DoS)
+        if pkg_file.stat().st_size > 1048576:
+            print(f"Skipping {pkg_file}: File too large")
+        else:
+            # You could add a JSON parser here to get more details
+            pass
 
     return tech_stack, dependencies
 
@@ -51,6 +60,10 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            # Security: Enforce 1MB file size limit to prevent Uncontrolled Resource Consumption (DoS)
+            if py_file.stat().st_size > 1048576:
+                print(f"Skipping {py_file}: File too large")
+                continue
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
