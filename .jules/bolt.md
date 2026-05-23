@@ -1,0 +1,3 @@
+## 2024-05-24 - [List Comprehension Redundancy]
+**Learning:** The walrus operator (:=) is highly effective for eliminating redundant function calls within list comprehensions when used for both filtering and generation (e.g., [stripped for line in f if (stripped := line.strip())]), often halving execution time for those operations.
+**Action:** Always use the walrus operator in list comprehensions where a value is calculated for filtering and then also used in the output generation to avoid duplicate processing overhead.
