@@ -34,8 +34,11 @@ def parse_dependencies(root_path):
     req_file = root_path / 'requirements.txt'
     if req_file.exists():
         tech_stack.append("Python")
-        with open(req_file, 'r') as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        if req_file.stat().st_size <= 1048576:
+            with open(req_file, 'r') as f:
+                dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        else:
+            print(f"Skipping {req_file}: file too large (>1MB)")
 
     pkg_file = root_path / 'package.json'
     if pkg_file.exists():
@@ -49,6 +52,9 @@ def analyze_python_code(root_path):
     code_elements = {"classes": [], "functions": []}
     for py_file in root_path.rglob("*.py"):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
+            continue
+        if py_file.stat().st_size > 1048576:
+            print(f"Skipping {py_file}: file too large (>1MB)")
             continue
         try:
             with open(py_file, 'r', encoding='utf-8') as f:
