@@ -51,6 +51,8 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            if py_file.stat().st_size > 1048576:
+                continue
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
