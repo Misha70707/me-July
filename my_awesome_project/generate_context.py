@@ -1,5 +1,6 @@
 # generate_context.py
 import os
+import sys
 import ast
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -59,7 +60,7 @@ def analyze_python_code(root_path):
                 if isinstance(node, ast.FunctionDef):
                     code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
         except Exception as e:
-            print(f"Could not parse {py_file}: {e}")
+            print(f"Could not parse {py_file}: {e}", file=sys.stderr)
     return code_elements
 
 # --- 2. MAIN EXECUTION ---
