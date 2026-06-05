@@ -19,9 +19,13 @@ def scan_project_structure(root_path):
     """Scans the directory and returns a structured representation."""
     structure = {}
     ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.vscode'}
+
+    # ⚡ Bolt Optimization: Hoist invariant conversion outside the loop
+    root_path_str = str(root_path)
+
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [d for d in dirs if d not in ignore_dirs]
-        level = root.replace(str(root_path), '').count(os.sep)
+        level = root.replace(root_path_str, '').count(os.sep)
         indent = ' ' * 2 * level
         structure[f"{indent}{os.path.basename(root)}/"] = [f for f in files if not f.startswith('.')]
     return structure
@@ -35,7 +39,8 @@ def parse_dependencies(root_path):
     if req_file.exists():
         tech_stack.append("Python")
         with open(req_file, 'r') as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            # ⚡ Bolt Optimization: Use walrus operator to avoid redundant line.strip()
+            dependencies = [stripped for line in f if not line.startswith('#') and (stripped := line.strip())]
 
     pkg_file = root_path / 'package.json'
     if pkg_file.exists():
