@@ -1,4 +1,4 @@
-## 2024-05-22 - Jinja2 Autoescape Default
-**Vulnerability:** Stored XSS in generated documentation due to disabled autoescaping in Jinja2.
-**Learning:** Jinja2's `Environment` defaults to `autoescape=False`. This is dangerous when rendering content from external files (like `requirements.txt`) into HTML/Markdown.
-**Prevention:** Always explicitly set `autoescape=True` when initializing `jinja2.Environment`, especially when dealing with untrusted or external input.
+## 2024-06-08 - Uncontrolled Resource Consumption (DoS) via AST Parsing
+**Vulnerability:** The script parsed arbitrarily large files using `ast.parse(f.read())` without validating file sizes first, leading to potential Uncontrolled Resource Consumption (DoS) if run against massive or malicious files.
+**Learning:** Python CLI tools that process arbitrary files must implement file size limits (using `Path.stat().st_size` for cohesiveness) prior to loading contents into memory. Limits are only needed before reading content, not for mere existence checks.
+**Prevention:** Implement an explicit file size check (e.g., `> 1024 * 1024` for 1MB) and route warnings to `sys.stderr` to avoid corrupting `stdout` output expected by chained tools.
