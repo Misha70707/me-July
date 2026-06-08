@@ -1,5 +1,6 @@
 # generate_context.py
 import os
+import sys
 import ast
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -51,13 +52,20 @@ def analyze_python_code(root_path):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
-            with open(py_file, 'r', encoding='utf-8') as f:
-                tree = ast.parse(f.read(), filename=str(py_file))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    code_elements["classes"].append(f"{node.name} (in {py_file.name})")
-                if isinstance(node, ast.FunctionDef):
-                    code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
+            tree = None
+            # SECURITY: Prevent DoS by limiting the size of files read into memory
+            if py_file.stat().st_size > 1024 * 1024:
+                print(f"Warning: Skipping {py_file} as it exceeds 1MB limit", file=sys.stderr)
+            else:
+                with open(py_file, 'r', encoding='utf-8') as f:
+                    tree = ast.parse(f.read(), filename=str(py_file))
+
+            if tree is not None:
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        code_elements["classes"].append(f"{node.name} (in {py_file.name})")
+                    if isinstance(node, ast.FunctionDef):
+                        code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
         except Exception as e:
             print(f"Could not parse {py_file}: {e}")
     return code_elements
