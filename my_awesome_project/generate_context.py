@@ -1,5 +1,6 @@
 # generate_context.py
 import os
+import sys
 import ast
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -47,10 +48,16 @@ def parse_dependencies(root_path):
 def analyze_python_code(root_path):
     """Uses AST to find classes and functions in Python files."""
     code_elements = {"classes": [], "functions": []}
+    MAX_FILE_SIZE = 1024 * 1024  # 1 MB limit to prevent DoS
     for py_file in root_path.rglob("*.py"):
         if 'venv' in py_file.parts or '__pycache__' in py_file.parts:
             continue
         try:
+            # Check file size to prevent Uncontrolled Resource Consumption
+            if py_file.stat().st_size > MAX_FILE_SIZE:
+                print(f"Warning: Skipping {py_file} because it exceeds the 1MB size limit.", file=sys.stderr)
+                continue
+
             with open(py_file, 'r', encoding='utf-8') as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
             for node in ast.walk(tree):
@@ -59,7 +66,7 @@ def analyze_python_code(root_path):
                 if isinstance(node, ast.FunctionDef):
                     code_elements["functions"].append(f"{node.name}() (in {py_file.name})")
         except Exception as e:
-            print(f"Could not parse {py_file}: {e}")
+            print(f"Could not parse {py_file}: {e}", file=sys.stderr)
     return code_elements
 
 # --- 2. MAIN EXECUTION ---
