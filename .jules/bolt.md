@@ -1,0 +1,3 @@
+## 2026-06-11 - Directory Traversal Performance
+**Learning:** `Path.rglob` followed by part filtering is significantly slower than `os.walk` with in-place directory list modification (e.g., `dirs[:] = [d for d in dirs if d not in ignore_dirs]`), because `rglob` still performs I/O traversal in ignored subdirectories before filtering them out. Additionally, invariant type conversions like `str(root_path)` inside hot loops like `os.walk` add redundant overhead.
+**Action:** When recursively traversing directories, use `os.walk` and modify the `dirs` list in-place to prune unwanted branches early, completely bypassing their I/O overhead. Hoist any invariant type conversions outside the loop.
