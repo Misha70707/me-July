@@ -19,9 +19,12 @@ def scan_project_structure(root_path):
     """Scans the directory and returns a structured representation."""
     structure = {}
     ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.vscode'}
+    # ⚡ Bolt Optimization: Hoist invariant type conversion outside of hot loop
+    # to avoid redundant str() casting during os.walk traversal
+    root_path_str = str(root_path)
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [d for d in dirs if d not in ignore_dirs]
-        level = root.replace(str(root_path), '').count(os.sep)
+        level = root.replace(root_path_str, '').count(os.sep)
         indent = ' ' * 2 * level
         structure[f"{indent}{os.path.basename(root)}/"] = [f for f in files if not f.startswith('.')]
     return structure
